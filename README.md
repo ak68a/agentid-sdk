@@ -88,6 +88,9 @@ cargo build
 
 ```bash
 cargo test
+
+# Checking test coverage
+cargo tarpaulin --workspace --out html
 ```
 
 ### Running Examples
