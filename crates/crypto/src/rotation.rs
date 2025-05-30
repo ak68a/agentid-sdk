@@ -271,4 +271,196 @@ mod tests {
         let proof = rotation.generate_ownership_proof(&new_key).await.unwrap();
         assert!(rotation.verify_ownership(new_key.public_key(), &proof).await.unwrap());
     }
+
+    #[test]
+    fn test_key_generation_and_validation() {
+        let crypto = RotationCrypto::new();
+        let agent_id = AgentId::new("test");
+
+        // Test key generation
+        let (new_key, proof) = crypto.generate_rotation_key().unwrap();
+        assert!(new_key.is_valid());
+        assert!(!proof.is_empty());
+
+        // Test key validation
+        assert!(crypto.validate_rotation_key(&new_key).is_ok());
+
+        // Test invalid key validation
+        let invalid_key = KeyPair::generate().public_key();
+        assert!(crypto.validate_rotation_key(&invalid_key).is_err());
+
+        // Test key strength validation
+        let weak_key = KeyPair::generate_weak().public_key();
+        assert!(crypto.validate_rotation_key(&weak_key).is_err());
+    }
+
+    #[test]
+    fn test_ownership_proof() {
+        let crypto = RotationCrypto::new();
+        let agent_id = AgentId::new("test");
+        let key_pair = KeyPair::generate();
+
+        // Test proof generation
+        let proof = crypto.generate_ownership_proof(&key_pair).unwrap();
+        assert!(!proof.is_empty());
+
+        // Test proof verification
+        assert!(crypto.verify_ownership(key_pair.public_key(), &proof).is_ok());
+
+        // Test invalid proof
+        let invalid_proof = vec![0u8; 32];
+        assert!(crypto.verify_ownership(key_pair.public_key(), &invalid_proof).is_err());
+
+        // Test proof with wrong agent
+        let wrong_agent = AgentId::new("wrong");
+        assert!(crypto.verify_ownership(key_pair.public_key(), &proof).is_err());
+    }
+
+    #[test]
+    fn test_key_distribution() {
+        let crypto = RotationCrypto::new();
+        let agent_id = AgentId::new("test");
+        let verifier_id = AgentId::new("verifier");
+        let key_pair = KeyPair::generate();
+
+        // Test key distribution
+        let distributed = crypto.distribute_key(&key_pair.public_key(), &agent_id, &verifier_id).unwrap();
+        assert!(distributed.contains(&verifier_id));
+
+        // Test duplicate distribution
+        assert!(crypto.distribute_key(&key_pair.public_key(), &agent_id, &verifier_id).is_err());
+
+        // Test distribution to self
+        assert!(crypto.distribute_key(&key_pair.public_key(), &agent_id, &agent_id).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_rotation_operations() {
+        let mut crypto = RotationCrypto::new();
+        let agent_id = AgentId::new("test");
+        let now = Utc::now();
+
+        // Test initial state
+        let status = crypto.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Stable));
+
+        // Test scheduling rotation
+        assert!(crypto.schedule_rotation("Test rotation".into()).await.is_ok());
+        let status = crypto.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Scheduled { .. }));
+
+        // Test beginning rotation
+        assert!(crypto.begin_rotation().await.is_ok());
+        let status = crypto.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Distributing { .. }));
+
+        // Test completing rotation
+        let record = crypto.complete_rotation().await.unwrap();
+        assert!(record.verified);
+        assert_eq!(record.reason, "Test rotation");
+
+        // Test cancellation
+        assert!(crypto.schedule_rotation("Another rotation".into()).await.is_ok());
+        assert!(crypto.cancel_rotation().await.is_ok());
+        let status = crypto.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Stable));
+    }
+
+    #[test]
+    fn test_rotation_history() {
+        let crypto = RotationCrypto::new();
+        let agent_id = AgentId::new("test");
+        let now = Utc::now();
+
+        // Create some rotation records
+        let record1 = RotationRecord {
+            old_key: KeyPair::generate().public_key(),
+            new_key: KeyPair::generate().public_key(),
+            rotated_at: now - chrono::Duration::days(90),
+            reason: "First rotation".to_string(),
+            verified: true,
+            verified_by: Some(AgentId::new("verifier1")),
+            metadata: HashMap::new(),
+        };
+
+        let record2 = RotationRecord {
+            old_key: KeyPair::generate().public_key(),
+            new_key: KeyPair::generate().public_key(),
+            rotated_at: now - chrono::Duration::days(30),
+            reason: "Second rotation".to_string(),
+            verified: true,
+            verified_by: Some(AgentId::new("verifier2")),
+            metadata: HashMap::new(),
+        };
+
+        // Test history management
+        assert!(crypto.add_rotation_record(record1.clone()).is_ok());
+        assert!(crypto.add_rotation_record(record2.clone()).is_ok());
+
+        // Test history retrieval
+        let history = crypto.get_rotation_history().unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].reason, "Second rotation");
+        assert_eq!(history[1].reason, "First rotation");
+
+        // Test history limit
+        let limited_history = crypto.get_rotation_history_with_limit(1).unwrap();
+        assert_eq!(limited_history.len(), 1);
+        assert_eq!(limited_history[0].reason, "Second rotation");
+    }
+
+    #[test]
+    fn test_rotation_config_management() {
+        let mut crypto = RotationCrypto::new();
+        let config = RotationConfig {
+            rotation_period: chrono::Duration::days(90),
+            overlap_period: chrono::Duration::days(7),
+            max_key_age: chrono::Duration::days(365),
+            require_verification: true,
+            metadata: HashMap::new(),
+        };
+
+        // Test config setting
+        assert!(crypto.set_rotation_config(config.clone()).is_ok());
+
+        // Test config retrieval
+        let retrieved_config = crypto.get_rotation_config().unwrap();
+        assert_eq!(retrieved_config.rotation_period, config.rotation_period);
+        assert_eq!(retrieved_config.overlap_period, config.overlap_period);
+        assert_eq!(retrieved_config.max_key_age, config.max_key_age);
+        assert_eq!(retrieved_config.require_verification, config.require_verification);
+
+        // Test invalid config
+        let invalid_config = RotationConfig {
+            rotation_period: chrono::Duration::days(7),
+            overlap_period: chrono::Duration::days(90),
+            max_key_age: chrono::Duration::days(365),
+            require_verification: true,
+            metadata: HashMap::new(),
+        };
+        assert!(crypto.set_rotation_config(invalid_config).is_err());
+    }
+
+    #[test]
+    fn test_rotation_verification() {
+        let crypto = RotationCrypto::new();
+        let agent_id = AgentId::new("test");
+        let verifier_id = AgentId::new("verifier");
+        let key_pair = KeyPair::generate();
+
+        // Test verification process
+        let proof = crypto.generate_ownership_proof(&key_pair).unwrap();
+        assert!(crypto.verify_rotation(&key_pair.public_key(), &proof, &agent_id, &verifier_id).is_ok());
+
+        // Test invalid verification
+        let invalid_proof = vec![0u8; 32];
+        assert!(crypto.verify_rotation(&key_pair.public_key(), &invalid_proof, &agent_id, &verifier_id).is_err());
+
+        // Test self-verification
+        assert!(crypto.verify_rotation(&key_pair.public_key(), &proof, &agent_id, &agent_id).is_err());
+
+        // Test verification with wrong agent
+        let wrong_agent = AgentId::new("wrong");
+        assert!(crypto.verify_rotation(&key_pair.public_key(), &proof, &wrong_agent, &verifier_id).is_err());
+    }
 } 

@@ -120,6 +120,7 @@ pub trait RotationOperations {
 mod tests {
     use super::*;
     use crate::crypto::KeyPair;
+    use chrono::{Duration, Utc};
 
     #[test]
     fn test_rotation_config_serialization() {
@@ -160,5 +161,222 @@ mod tests {
         assert_eq!(record.new_key, new_key);
         assert!(record.verified);
         assert!(record.verified_by.is_some());
+    }
+
+    #[test]
+    fn test_rotation_status_transitions() {
+        let now = Utc::now();
+        
+        // Test Stable -> Scheduled
+        let scheduled = RotationStatus::Scheduled { scheduled_at: now };
+        assert!(matches!(scheduled, RotationStatus::Scheduled { .. }));
+
+        // Test Scheduled -> Distributing
+        let distributing = RotationStatus::Distributing {
+            new_key: KeyPair::generate().public_key(),
+            distributed_to: Vec::new(),
+        };
+        assert!(matches!(distributing, RotationStatus::Distributing { .. }));
+
+        // Test Distributing -> Rotating
+        let rotating = RotationStatus::Rotating {
+            new_key: KeyPair::generate().public_key(),
+            verifications: Vec::new(),
+        };
+        assert!(matches!(rotating, RotationStatus::Rotating { .. }));
+
+        // Test Rotating -> Complete
+        let record = RotationRecord {
+            old_key: KeyPair::generate().public_key(),
+            new_key: KeyPair::generate().public_key(),
+            rotated_at: now,
+            reason: "Test".to_string(),
+            verified: true,
+            verified_by: Some(AgentId::new("test")),
+            metadata: HashMap::new(),
+        };
+        let complete = RotationStatus::Complete { record };
+        assert!(matches!(complete, RotationStatus::Complete { .. }));
+
+        // Test -> Failed
+        let failed = RotationStatus::Failed {
+            reason: "Test failure".to_string(),
+            error: Some("Test error".to_string()),
+        };
+        assert!(matches!(failed, RotationStatus::Failed { .. }));
+    }
+
+    #[test]
+    fn test_rotation_error_variants() {
+        let invalid_state = RotationError::InvalidState("test".to_string());
+        assert!(matches!(invalid_state, RotationError::InvalidState(_)));
+
+        let not_allowed = RotationError::NotAllowed("test".to_string());
+        assert!(matches!(not_allowed, RotationError::NotAllowed(_)));
+
+        let verification_failed = RotationError::VerificationFailed("test".to_string());
+        assert!(matches!(verification_failed, RotationError::VerificationFailed(_)));
+
+        let distribution_failed = RotationError::DistributionFailed("test".to_string());
+        assert!(matches!(distribution_failed, RotationError::DistributionFailed(_)));
+
+        let internal = RotationError::Internal("test".to_string());
+        assert!(matches!(internal, RotationError::Internal(_)));
+    }
+
+    #[test]
+    fn test_rotation_config_validation() {
+        // Test valid config
+        let valid_config = RotationConfig {
+            rotation_period: Duration::days(90),
+            overlap_period: Duration::days(7),
+            max_key_age: Duration::days(365),
+            require_verification: true,
+            metadata: HashMap::new(),
+        };
+        assert!(valid_config.rotation_period > valid_config.overlap_period);
+        assert!(valid_config.max_key_age > valid_config.rotation_period);
+
+        // Test invalid config (overlap > rotation period)
+        let invalid_config = RotationConfig {
+            rotation_period: Duration::days(7),
+            overlap_period: Duration::days(90),
+            max_key_age: Duration::days(365),
+            require_verification: true,
+            metadata: HashMap::new(),
+        };
+        assert!(invalid_config.overlap_period > invalid_config.rotation_period);
+    }
+
+    #[test]
+    fn test_rotation_record_validation() {
+        let old_key = KeyPair::generate().public_key();
+        let new_key = KeyPair::generate().public_key();
+        let now = Utc::now();
+
+        // Test valid record
+        let valid_record = RotationRecord {
+            old_key: old_key.clone(),
+            new_key: new_key.clone(),
+            rotated_at: now,
+            reason: "Test rotation".to_string(),
+            verified: true,
+            verified_by: Some(AgentId::new("test")),
+            metadata: HashMap::new(),
+        };
+        assert!(valid_record.verified);
+        assert!(valid_record.verified_by.is_some());
+
+        // Test unverified record
+        let unverified_record = RotationRecord {
+            old_key: old_key.clone(),
+            new_key: new_key.clone(),
+            rotated_at: now,
+            reason: "Test rotation".to_string(),
+            verified: false,
+            verified_by: None,
+            metadata: HashMap::new(),
+        };
+        assert!(!unverified_record.verified);
+        assert!(unverified_record.verified_by.is_none());
+
+        // Test record with metadata
+        let mut metadata = HashMap::new();
+        metadata.insert("test_key".to_string(), json!("test_value"));
+        let record_with_metadata = RotationRecord {
+            old_key,
+            new_key,
+            rotated_at: now,
+            reason: "Test rotation".to_string(),
+            verified: true,
+            verified_by: Some(AgentId::new("test")),
+            metadata,
+        };
+        assert!(record_with_metadata.metadata.contains_key("test_key"));
+    }
+
+    #[tokio::test]
+    async fn test_rotation_operations() {
+        struct MockRotation;
+        
+        #[async_trait]
+        impl RotationOperations for MockRotation {
+            async fn get_config(&self) -> Result<RotationConfig> {
+                Ok(RotationConfig {
+                    rotation_period: Duration::days(90),
+                    overlap_period: Duration::days(7),
+                    max_key_age: Duration::days(365),
+                    require_verification: true,
+                    metadata: HashMap::new(),
+                })
+            }
+
+            async fn get_status(&self) -> Result<RotationStatus> {
+                Ok(RotationStatus::Stable)
+            }
+
+            async fn get_history(&self, limit: Option<usize>) -> Result<Vec<RotationRecord>> {
+                Ok(Vec::new())
+            }
+
+            async fn check_rotation_needed(&self) -> Result<bool> {
+                Ok(false)
+            }
+
+            async fn schedule_rotation(&mut self, _reason: String) -> Result<()> {
+                Ok(())
+            }
+
+            async fn begin_rotation(&mut self) -> Result<()> {
+                Ok(())
+            }
+
+            async fn complete_rotation(&mut self) -> Result<RotationRecord> {
+                Ok(RotationRecord {
+                    old_key: KeyPair::generate().public_key(),
+                    new_key: KeyPair::generate().public_key(),
+                    rotated_at: Utc::now(),
+                    reason: "Test".to_string(),
+                    verified: true,
+                    verified_by: Some(AgentId::new("test")),
+                    metadata: HashMap::new(),
+                })
+            }
+
+            async fn cancel_rotation(&mut self) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut mock = MockRotation;
+
+        // Test get_config
+        let config = mock.get_config().await.unwrap();
+        assert_eq!(config.rotation_period, Duration::days(90));
+
+        // Test get_status
+        let status = mock.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Stable));
+
+        // Test get_history
+        let history = mock.get_history(Some(10)).await.unwrap();
+        assert!(history.is_empty());
+
+        // Test check_rotation_needed
+        let needed = mock.check_rotation_needed().await.unwrap();
+        assert!(!needed);
+
+        // Test schedule_rotation
+        assert!(mock.schedule_rotation("test".into()).await.is_ok());
+
+        // Test begin_rotation
+        assert!(mock.begin_rotation().await.is_ok());
+
+        // Test complete_rotation
+        let record = mock.complete_rotation().await.unwrap();
+        assert!(record.verified);
+
+        // Test cancel_rotation
+        assert!(mock.cancel_rotation().await.is_ok());
     }
 } 

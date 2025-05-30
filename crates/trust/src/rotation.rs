@@ -412,4 +412,231 @@ mod tests {
         assert!(verifiers.len() <= 3);
         // Additional assertions about verifier trust levels and scores
     }
+
+    // New tests for trust requirements
+    #[test]
+    fn test_trust_requirements() {
+        let trust = RotationTrust::new();
+        let agent_id = AgentId::new("test");
+
+        // Test trust requirements for different trust levels
+        let low_trust = TrustLevel::Low;
+        let requirements = trust.get_trust_requirements(&agent_id, low_trust).unwrap();
+        assert_eq!(requirements.required_verifiers, 1);
+        assert_eq!(requirements.min_trust_level, TrustLevel::Low);
+
+        let high_trust = TrustLevel::High;
+        let requirements = trust.get_trust_requirements(&agent_id, high_trust).unwrap();
+        assert_eq!(requirements.required_verifiers, 3);
+        assert_eq!(requirements.min_trust_level, TrustLevel::Medium);
+
+        // Test trust requirements for new agent
+        let new_agent = AgentId::new("new");
+        let requirements = trust.get_trust_requirements(&new_agent, TrustLevel::Medium).unwrap();
+        assert_eq!(requirements.required_verifiers, 2);
+        assert_eq!(requirements.min_trust_level, TrustLevel::Medium);
+    }
+
+    #[test]
+    fn test_trust_score_updates() {
+        let mut trust = RotationTrust::new();
+        let agent_id = AgentId::new("test");
+        let verifier_id = AgentId::new("verifier");
+
+        // Test successful rotation trust update
+        assert!(trust.update_trust(&agent_id, &verifier_id, true).is_ok());
+        let score = trust.get_trust_score(&agent_id).unwrap();
+        assert!(score > 0.0);
+
+        // Test failed rotation trust update
+        assert!(trust.update_trust(&agent_id, &verifier_id, false).is_ok());
+        let new_score = trust.get_trust_score(&agent_id).unwrap();
+        assert!(new_score < score);
+
+        // Test trust update for new agent
+        let new_agent = AgentId::new("new");
+        assert!(trust.update_trust(&new_agent, &verifier_id, true).is_ok());
+        let score = trust.get_trust_score(&new_agent).unwrap();
+        assert!(score > 0.0);
+    }
+
+    #[test]
+    fn test_verifier_scoring() {
+        let trust = RotationTrust::new();
+        let agent_id = AgentId::new("test");
+        let verifier_id = AgentId::new("verifier");
+
+        // Test verifier scoring
+        let score = trust.calculate_verifier_score(&verifier_id, &agent_id).unwrap();
+        assert!(score >= 0.0);
+        assert!(score <= 1.0);
+
+        // Test scoring with different trust levels
+        let high_trust_verifier = AgentId::new("high_trust");
+        trust.update_trust(&high_trust_verifier, &agent_id, true).unwrap();
+        let high_score = trust.calculate_verifier_score(&high_trust_verifier, &agent_id).unwrap();
+        assert!(high_score > score);
+
+        // Test scoring with verification history
+        for _ in 0..5 {
+            trust.update_trust(&verifier_id, &agent_id, true).unwrap();
+        }
+        let history_score = trust.calculate_verifier_score(&verifier_id, &agent_id).unwrap();
+        assert!(history_score > score);
+    }
+
+    #[tokio::test]
+    async fn test_rotation_operations() {
+        let mut trust = RotationTrust::new();
+        let agent_id = AgentId::new("test");
+        let now = Utc::now();
+
+        // Test initial state
+        let status = trust.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Stable));
+
+        // Test scheduling with insufficient trust
+        assert!(trust.schedule_rotation("Test rotation".into()).await.is_err());
+
+        // Build up trust
+        for _ in 0..5 {
+            trust.update_trust(&agent_id, &AgentId::new("verifier"), true).unwrap();
+        }
+
+        // Test scheduling with sufficient trust
+        assert!(trust.schedule_rotation("Test rotation".into()).await.is_ok());
+        let status = trust.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Scheduled { .. }));
+
+        // Test beginning rotation
+        assert!(trust.begin_rotation().await.is_ok());
+        let status = trust.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Rotating { .. }));
+
+        // Test completing rotation
+        let record = trust.complete_rotation().await.unwrap();
+        assert!(record.verified);
+        assert_eq!(record.reason, "Test rotation");
+
+        // Test cancellation
+        assert!(trust.schedule_rotation("Another rotation".into()).await.is_ok());
+        assert!(trust.cancel_rotation().await.is_ok());
+        let status = trust.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Stable));
+    }
+
+    #[test]
+    fn test_trust_history() {
+        let mut trust = RotationTrust::new();
+        let agent_id = AgentId::new("test");
+        let verifier_id = AgentId::new("verifier");
+        let now = Utc::now();
+
+        // Create trust history
+        for i in 0..5 {
+            let timestamp = now - chrono::Duration::days(i * 30);
+            let success = i % 2 == 0;
+            assert!(trust.update_trust_with_timestamp(&agent_id, &verifier_id, success, timestamp).is_ok());
+        }
+
+        // Test history retrieval
+        let history = trust.get_trust_history(&agent_id).unwrap();
+        assert_eq!(history.len(), 5);
+
+        // Test history ordering
+        for i in 0..4 {
+            assert!(history[i].timestamp > history[i + 1].timestamp);
+        }
+
+        // Test history filtering
+        let recent_history = trust.get_trust_history_since(&agent_id, now - chrono::Duration::days(60)).unwrap();
+        assert_eq!(recent_history.len(), 2);
+
+        // Test success rate calculation
+        let success_rate = trust.calculate_success_rate(&agent_id).unwrap();
+        assert_eq!(success_rate, 0.6); // 3 successes out of 5 attempts
+    }
+
+    #[test]
+    fn test_trust_level_transitions() {
+        let mut trust = RotationTrust::new();
+        let agent_id = AgentId::new("test");
+        let verifier_id = AgentId::new("verifier");
+
+        // Test initial trust level
+        let initial_level = trust.get_trust_level(&agent_id).unwrap();
+        assert_eq!(initial_level, TrustLevel::Low);
+
+        // Test trust level increase
+        for _ in 0..10 {
+            trust.update_trust(&agent_id, &verifier_id, true).unwrap();
+        }
+        let increased_level = trust.get_trust_level(&agent_id).unwrap();
+        assert!(increased_level > initial_level);
+
+        // Test trust level decrease
+        for _ in 0..5 {
+            trust.update_trust(&agent_id, &verifier_id, false).unwrap();
+        }
+        let decreased_level = trust.get_trust_level(&agent_id).unwrap();
+        assert!(decreased_level < increased_level);
+
+        // Test trust level stability
+        let stable_level = trust.get_trust_level(&agent_id).unwrap();
+        for _ in 0..3 {
+            trust.update_trust(&agent_id, &verifier_id, true).unwrap();
+            trust.update_trust(&agent_id, &verifier_id, false).unwrap();
+        }
+        let new_level = trust.get_trust_level(&agent_id).unwrap();
+        assert_eq!(new_level, stable_level);
+    }
+
+    #[test]
+    fn test_verifier_selection() {
+        let mut trust = RotationTrust::new();
+        let agent_id = AgentId::new("test");
+        let now = Utc::now();
+
+        // Create pool of verifiers with different trust levels
+        let verifiers = vec![
+            AgentId::new("verifier1"),
+            AgentId::new("verifier2"),
+            AgentId::new("verifier3"),
+            AgentId::new("verifier4"),
+            AgentId::new("verifier5"),
+        ];
+
+        // Build up trust for verifiers
+        for (i, verifier) in verifiers.iter().enumerate() {
+            for _ in 0..(i + 1) {
+                trust.update_trust(verifier, &agent_id, true).unwrap();
+            }
+        }
+
+        // Test verifier selection for different requirements
+        let low_requirements = TrustRequirements {
+            required_verifiers: 1,
+            min_trust_level: TrustLevel::Low,
+        };
+        let low_verifiers = trust.get_trusted_verifiers(&agent_id, &low_requirements).unwrap();
+        assert_eq!(low_verifiers.len(), 1);
+        assert!(trust.get_trust_level(&low_verifiers[0]).unwrap() >= TrustLevel::Low);
+
+        let high_requirements = TrustRequirements {
+            required_verifiers: 3,
+            min_trust_level: TrustLevel::High,
+        };
+        let high_verifiers = trust.get_trusted_verifiers(&agent_id, &high_requirements).unwrap();
+        assert_eq!(high_verifiers.len(), 3);
+        for verifier in &high_verifiers {
+            assert!(trust.get_trust_level(verifier).unwrap() >= TrustLevel::High);
+        }
+
+        // Test verifier selection with insufficient trust
+        let impossible_requirements = TrustRequirements {
+            required_verifiers: 5,
+            min_trust_level: TrustLevel::High,
+        };
+        assert!(trust.get_trusted_verifiers(&agent_id, &impossible_requirements).is_err());
+    }
 } 

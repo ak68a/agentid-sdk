@@ -374,4 +374,223 @@ mod tests {
         let result = verifier.verify_rotation(&request, &verifier_agent, proof).await.unwrap();
         assert!(!result.successful); // Should fail with invalid proof
     }
+
+    // New tests for verification policy
+    #[test]
+    fn test_verification_policy() {
+        let verifier = RotationVerifier::new();
+        let agent_id = AgentId::new("test");
+
+        // Test policy creation for different trust levels
+        let low_trust_policy = verifier.create_rotation_policy(&agent_id, TrustLevel::Low).unwrap();
+        assert_eq!(low_trust_policy.required_verifiers, 1);
+        assert_eq!(low_trust_policy.min_trust_level, TrustLevel::Low);
+
+        let high_trust_policy = verifier.create_rotation_policy(&agent_id, TrustLevel::High).unwrap();
+        assert_eq!(high_trust_policy.required_verifiers, 3);
+        assert_eq!(high_trust_policy.min_trust_level, TrustLevel::Medium);
+
+        // Test policy validation
+        assert!(verifier.validate_policy(&low_trust_policy).is_ok());
+        assert!(verifier.validate_policy(&high_trust_policy).is_ok());
+
+        // Test invalid policy
+        let invalid_policy = VerificationPolicy {
+            required_verifiers: 0,
+            min_trust_level: TrustLevel::Low,
+            timeout: Duration::hours(24),
+            metadata: HashMap::new(),
+        };
+        assert!(verifier.validate_policy(&invalid_policy).is_err());
+    }
+
+    #[test]
+    fn test_verification_request() {
+        let mut verifier = RotationVerifier::new();
+        let agent_id = AgentId::new("test");
+        let verifier_id = AgentId::new("verifier");
+        let key_pair = KeyPair::generate();
+
+        // Test request creation
+        let policy = verifier.create_rotation_policy(&agent_id, TrustLevel::Medium).unwrap();
+        let request = verifier.create_rotation_request(&agent_id, &key_pair.public_key(), &policy).unwrap();
+        assert_eq!(request.agent_id, agent_id);
+        assert_eq!(request.public_key, key_pair.public_key());
+        assert_eq!(request.status, VerificationStatus::Pending);
+
+        // Test request retrieval
+        let retrieved = verifier.get_verification_request(&request.id).unwrap();
+        assert_eq!(retrieved.id, request.id);
+        assert_eq!(retrieved.agent_id, agent_id);
+
+        // Test request expiration
+        let expired_request = verifier.create_rotation_request(
+            &agent_id,
+            &key_pair.public_key(),
+            &VerificationPolicy {
+                required_verifiers: 1,
+                min_trust_level: TrustLevel::Low,
+                timeout: Duration::seconds(0),
+                metadata: HashMap::new(),
+            },
+        ).unwrap();
+        assert!(verifier.check_request_expired(&expired_request).unwrap());
+    }
+
+    #[test]
+    fn test_verification_process() {
+        let mut verifier = RotationVerifier::new();
+        let agent_id = AgentId::new("test");
+        let verifier_id = AgentId::new("verifier");
+        let key_pair = KeyPair::generate();
+
+        // Create and verify request
+        let policy = verifier.create_rotation_policy(&agent_id, TrustLevel::Medium).unwrap();
+        let request = verifier.create_rotation_request(&agent_id, &key_pair.public_key(), &policy).unwrap();
+        let proof = verifier.generate_verification_proof(&key_pair, &agent_id).unwrap();
+
+        // Test successful verification
+        assert!(verifier.verify_rotation(&request.id, &verifier_id, &proof).is_ok());
+        let result = verifier.get_verification_result(&request.id).unwrap();
+        assert_eq!(result.status, VerificationStatus::Verified);
+        assert!(result.verified_by.contains(&verifier_id));
+
+        // Test duplicate verification
+        assert!(verifier.verify_rotation(&request.id, &verifier_id, &proof).is_err());
+
+        // Test invalid proof
+        let invalid_proof = vec![0u8; 32];
+        assert!(verifier.verify_rotation(&request.id, &AgentId::new("other"), &invalid_proof).is_err());
+
+        // Test self-verification
+        assert!(verifier.verify_rotation(&request.id, &agent_id, &proof).is_err());
+    }
+
+    #[test]
+    fn test_verification_requirements() {
+        let mut verifier = RotationVerifier::new();
+        let agent_id = AgentId::new("test");
+        let key_pair = KeyPair::generate();
+
+        // Create policy requiring multiple verifiers
+        let policy = VerificationPolicy {
+            required_verifiers: 3,
+            min_trust_level: TrustLevel::Medium,
+            timeout: Duration::hours(24),
+            metadata: HashMap::new(),
+        };
+        let request = verifier.create_rotation_request(&agent_id, &key_pair.public_key(), &policy).unwrap();
+        let proof = verifier.generate_verification_proof(&key_pair, &agent_id).unwrap();
+
+        // Test insufficient verifications
+        assert!(verifier.verify_rotation(&request.id, &AgentId::new("verifier1"), &proof).is_ok());
+        assert!(!verifier.check_verification_requirements(&request.id).unwrap());
+
+        // Test sufficient verifications
+        assert!(verifier.verify_rotation(&request.id, &AgentId::new("verifier2"), &proof).is_ok());
+        assert!(verifier.verify_rotation(&request.id, &AgentId::new("verifier3"), &proof).is_ok());
+        assert!(verifier.check_verification_requirements(&request.id).unwrap());
+
+        // Test verification timeout
+        let expired_request = verifier.create_rotation_request(
+            &agent_id,
+            &key_pair.public_key(),
+            &VerificationPolicy {
+                required_verifiers: 1,
+                min_trust_level: TrustLevel::Low,
+                timeout: Duration::seconds(0),
+                metadata: HashMap::new(),
+            },
+        ).unwrap();
+        assert!(!verifier.check_verification_requirements(&expired_request.id).unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_rotation_operations() {
+        let mut verifier = RotationVerifier::new();
+        let agent_id = AgentId::new("test");
+        let now = Utc::now();
+
+        // Test initial state
+        let status = verifier.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Stable));
+
+        // Test scheduling rotation
+        assert!(verifier.schedule_rotation("Test rotation".into()).await.is_ok());
+        let status = verifier.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Scheduled { .. }));
+
+        // Test beginning rotation
+        assert!(verifier.begin_rotation().await.is_ok());
+        let status = verifier.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Rotating { .. }));
+
+        // Test completing rotation
+        let record = verifier.complete_rotation().await.unwrap();
+        assert!(record.verified);
+        assert_eq!(record.reason, "Test rotation");
+
+        // Test cancellation
+        assert!(verifier.schedule_rotation("Another rotation".into()).await.is_ok());
+        assert!(verifier.cancel_rotation().await.is_ok());
+        let status = verifier.get_status().await.unwrap();
+        assert!(matches!(status, RotationStatus::Stable));
+    }
+
+    #[test]
+    fn test_verification_history() {
+        let mut verifier = RotationVerifier::new();
+        let agent_id = AgentId::new("test");
+        let verifier_id = AgentId::new("verifier");
+        let key_pair = KeyPair::generate();
+        let now = Utc::now();
+
+        // Create verification history
+        for i in 0..5 {
+            let policy = verifier.create_rotation_policy(&agent_id, TrustLevel::Medium).unwrap();
+            let request = verifier.create_rotation_request(&agent_id, &key_pair.public_key(), &policy).unwrap();
+            let proof = verifier.generate_verification_proof(&key_pair, &agent_id).unwrap();
+            assert!(verifier.verify_rotation(&request.id, &verifier_id, &proof).is_ok());
+        }
+
+        // Test history retrieval
+        let history = verifier.get_verification_history(&agent_id).unwrap();
+        assert_eq!(history.len(), 5);
+
+        // Test history filtering
+        let recent_history = verifier.get_verification_history_since(&agent_id, now - Duration::days(1)).unwrap();
+        assert_eq!(recent_history.len(), 5);
+
+        // Test history statistics
+        let stats = verifier.get_verification_statistics(&agent_id).unwrap();
+        assert_eq!(stats.total_verifications, 5);
+        assert_eq!(stats.successful_verifications, 5);
+        assert_eq!(stats.success_rate, 1.0);
+    }
+
+    #[test]
+    fn test_verification_proof_generation() {
+        let verifier = RotationVerifier::new();
+        let agent_id = AgentId::new("test");
+        let key_pair = KeyPair::generate();
+
+        // Test proof generation
+        let proof = verifier.generate_verification_proof(&key_pair, &agent_id).unwrap();
+        assert!(!proof.is_empty());
+
+        // Test proof validation
+        assert!(verifier.validate_verification_proof(&key_pair.public_key(), &proof, &agent_id).is_ok());
+
+        // Test invalid proof
+        let invalid_proof = vec![0u8; 32];
+        assert!(verifier.validate_verification_proof(&key_pair.public_key(), &invalid_proof, &agent_id).is_err());
+
+        // Test proof with wrong agent
+        let wrong_agent = AgentId::new("wrong");
+        assert!(verifier.validate_verification_proof(&key_pair.public_key(), &proof, &wrong_agent).is_err());
+
+        // Test proof with wrong key
+        let wrong_key = KeyPair::generate().public_key();
+        assert!(verifier.validate_verification_proof(&wrong_key, &proof, &agent_id).is_err());
+    }
 } 
