@@ -1,0 +1,34 @@
+[package]
+name = "agentid-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core implementation of the Agent Commerce Kit Identity (ACK ID) protocol"
+
+[dependencies]
+# Workspace dependencies
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+
+# Internal dependencies
+agentid-crypto = { path = "../crypto" }
+agentid-trust = { path = "../trust" }
+agentid-verify = { path = "../verify" }
+
+# Additional dependencies
+uuid = { version = "1.7", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+validator = { version = "0.16", features = ["derive"] }
+url = { version = "2.5", features = ["serde"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = { workspace = true }
+criterion = { workspace = true } 

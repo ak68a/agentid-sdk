@@ -1,0 +1,37 @@
+[workspace]
+members = [
+    "crates/core",
+    "crates/crypto",
+    "crates/trust",
+    "crates/verify",
+    "bindings/python",
+    "bindings/node",
+    "bindings/java",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/agentid-sdk"
+description = "Agent Commerce Kit Identity (ACK ID) SDK"
+
+[workspace.dependencies]
+# Common dependencies for all crates
+tokio = { version = "1.36", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+async-trait = "0.1"
+futures = "0.3"
+
+# Crypto-related dependencies
+ring = "0.17"
+ed25519-dalek = "2.1"
+rand = "0.8"
+
+# Testing
+criterion = "0.5"
+mockall = "0.12" 
