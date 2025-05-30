@@ -31,4 +31,8 @@ url = { version = "2.5", features = ["serde"] }
 [dev-dependencies]
 tokio-test = "0.4"
 mockall = { workspace = true }
-criterion = { workspace = true } 
+criterion = { workspace = true }
+
+[[test]]
+name = "basic_flows"
+path = "tests/basic_flows/mod.rs" 

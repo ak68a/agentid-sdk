@@ -4,14 +4,11 @@
 //! which represents the identity and verification state of an agent.
 
 use std::fmt;
-use std::sync::Arc;
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use validator::Validate;
 
-use crate::{Agent, AgentIdError, Result};
+use crate::{Agent, Result};
 use agentid_types::AgentId;
 
 /// Represents the verification level of an identity

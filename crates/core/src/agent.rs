@@ -4,12 +4,9 @@
 //! which represents an autonomous entity in the ACK ID system.
 
 use std::fmt;
-use std::sync::Arc;
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use validator::Validate;
 
 use crate::Result;
 use agentid_types::{AgentCapabilities, AgentId, AgentStatus};
@@ -167,5 +164,82 @@ mod tests {
 
         agent.update_status(AgentStatus::Revoked).unwrap();
         assert!(!agent.can_commerce());
+    }
+
+    #[test]
+    fn test_agent_with_capabilities() {
+        let capabilities = AgentCapabilities {
+            can_commerce: false,
+            can_verify: true,
+            can_manage_trust: false,
+        };
+        let agent = Agent::with_capabilities("test-agent", capabilities.clone()).unwrap();
+        assert_eq!(agent.capabilities(), &capabilities);
+        assert!(!agent.can_commerce());
+        assert!(agent.can_verify());
+        assert!(!agent.can_manage_trust());
+    }
+
+    #[test]
+    fn test_agent_update_capabilities() {
+        let mut agent = Agent::new("test-agent").unwrap();
+        let initial_capabilities = agent.capabilities().clone();
+
+        let new_capabilities = AgentCapabilities {
+            can_commerce: false,
+            can_verify: true,
+            can_manage_trust: true,
+        };
+
+        agent.update_capabilities(new_capabilities.clone()).unwrap();
+        assert_eq!(agent.capabilities(), &new_capabilities);
+        assert_ne!(agent.capabilities(), &initial_capabilities);
+        assert!(!agent.can_commerce());
+        assert!(agent.can_verify());
+        assert!(agent.can_manage_trust());
+    }
+
+    #[test]
+    fn test_agent_metadata() {
+        let mut agent = Agent::new("test-agent").unwrap();
+        assert_eq!(agent.metadata(), &serde_json::json!({}));
+
+        let metadata = serde_json::json!({
+            "name": "Test Agent",
+            "version": "1.0",
+            "tags": ["test", "agent"]
+        });
+
+        agent.update_metadata(metadata.clone()).unwrap();
+        assert_eq!(agent.metadata(), &metadata);
+    }
+
+    #[test]
+    fn test_agent_updated_at() {
+        let mut agent = Agent::new("test-agent").unwrap();
+        let initial_updated_at = agent.updated_at();
+
+        // Wait a small amount of time to ensure timestamp difference
+        std::thread::sleep(std::time::Duration::from_millis(1));
+
+        agent.update_status(AgentStatus::Suspended).unwrap();
+        assert!(agent.updated_at() > initial_updated_at);
+
+        let second_updated_at = agent.updated_at();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+
+        agent
+            .update_capabilities(AgentCapabilities::default())
+            .unwrap();
+        assert!(agent.updated_at() > second_updated_at);
+    }
+
+    #[test]
+    fn test_agent_display() {
+        let agent = Agent::new("test-agent").unwrap();
+        let display = format!("{}", agent);
+        assert!(display.contains("test-agent"));
+        assert!(display.contains("Active"));
+        assert!(display.contains("Updated:"));
     }
 }

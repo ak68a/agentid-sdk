@@ -3,7 +3,6 @@
 //! This crate provides the fundamental types and traits for implementing
 //! agent-based identity and trust in commerce applications.
 
-use agentid_types::{AgentCapabilities, AgentId, AgentStatus, TrustLevel, TrustScore};
 
 pub mod agent;
 pub mod identity;
@@ -39,6 +38,8 @@ pub enum AgentIdError {
     InvalidIdentityData(String),
     #[error("Verification failed: {0}")]
     VerificationFailed(String),
+    #[error("Verification error: {0}")]
+    VerificationError(String),
     #[error("Trust level error: {0}")]
     TrustLevelError(String),
     #[error("Internal error: {0}")]

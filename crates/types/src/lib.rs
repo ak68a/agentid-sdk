@@ -42,7 +42,7 @@ impl fmt::Display for AgentId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentCapabilities {
     pub can_commerce: bool,
     pub can_verify: bool,
