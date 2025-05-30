@@ -1,27 +1,37 @@
 //! Trust framework for Agent Commerce Kit Identity (ACK ID)
-//! 
+//!
 //! This crate implements the trust framework components for ACK ID, including:
 //! - Trust scoring and assessment
 //! - Trust attributes and metrics
 //! - Trust relationships and delegation
 //! - Trust lifecycle management
 //! - Trust verification and validation
+//!
+//! TODO: Implement trust delegation features:
+//! - Chain of trust validation
+//! - Delegation depth limits
+//! - Delegation revocation
+//! - Delegation history tracking
+//!
+//! TODO: Implement advanced verification workflows:
+//! - Multi-agent verification
+//! - Consensus-based verification
+//! - Verification evidence collection
+//! - Verification history and audit trails
 
-mod error;
-mod score;
 mod attributes;
-mod relationships;
+mod error;
 mod lifecycle;
+mod relationships;
+mod score;
 mod verification;
-pub mod rotation;
 
+pub use attributes::{AttributeSource, TrustAttribute, TrustAttributeSet};
 pub use error::TrustError;
-pub use score::{TrustScore, TrustLevel, TrustMetrics};
-pub use attributes::{TrustAttribute, TrustAttributeSet, AttributeSource};
-pub use relationships::{TrustRelationship, TrustDelegation, RelationshipType};
-pub use lifecycle::{TrustLifecycle, TrustState, StateTransition};
-pub use verification::{TrustVerifier, VerificationResult, VerificationPolicy};
-pub use rotation::RotationTrust;
+pub use lifecycle::{StateTransition, TrustLifecycle, TrustState};
+pub use relationships::{RelationshipType, TrustDelegation, TrustRelationship};
+pub use score::{TrustLevel, TrustMetrics, TrustScore};
+pub use verification::{TrustVerifier, VerificationPolicy, VerificationResult};
 
 /// Result type for trust operations
 pub type Result<T> = std::result::Result<T, TrustError>;
@@ -31,38 +41,38 @@ pub type Result<T> = std::result::Result<T, TrustError>;
 pub trait TrustOperations {
     /// Calculate a trust score based on available attributes and metrics
     async fn calculate_trust_score(&self, attributes: &TrustAttributeSet) -> Result<TrustScore>;
-    
+
     /// Assess trust level based on current trust score and policy
     async fn assess_trust_level(&self, score: &TrustScore) -> Result<TrustLevel>;
-    
+
     /// Establish a trust relationship between two agents
     async fn establish_relationship(
         &self,
         relationship_type: RelationshipType,
         attributes: &TrustAttributeSet,
     ) -> Result<TrustRelationship>;
-    
+
     /// Delegate trust to another agent
     async fn delegate_trust(
         &self,
         delegation: TrustDelegation,
         attributes: &TrustAttributeSet,
     ) -> Result<TrustRelationship>;
-    
+
     /// Update trust attributes for an agent
     async fn update_attributes(
         &self,
         agent_id: &str,
         attributes: &TrustAttributeSet,
     ) -> Result<TrustAttributeSet>;
-    
+
     /// Verify trust status of an agent
     async fn verify_trust(
         &self,
         agent_id: &str,
         policy: &VerificationPolicy,
     ) -> Result<VerificationResult>;
-    
+
     /// Manage trust lifecycle state transitions
     async fn transition_state(
         &self,
@@ -101,4 +111,4 @@ impl Default for TrustConfig {
             verification_policies: std::collections::HashMap::new(),
         }
     }
-} 
+}

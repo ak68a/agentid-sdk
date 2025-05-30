@@ -14,8 +14,10 @@ pub struct Signature {
 impl Signature {
     /// Create a new signature from bytes
     pub fn from_bytes(bytes: &[u8]) -> crate::Result<Self> {
-        let ed25519_signature = Ed25519Signature::from_bytes(bytes)
-            .map_err(|e| crate::CryptoError::InvalidSignature(e.to_string()))?;
+        let bytes: [u8; 64] = bytes
+            .try_into()
+            .map_err(|_| crate::CryptoError::InvalidSignature("Invalid signature length".into()))?;
+        let ed25519_signature = Ed25519Signature::from_bytes(&bytes);
 
         Ok(Self {
             signature_bytes: bytes.to_vec(),

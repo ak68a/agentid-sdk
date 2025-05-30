@@ -1,4 +1,5 @@
-use ring::aead;
+use ring::aead::{self, Aad};
+use ring::rand::SecureRandom;
 use serde::{Deserialize, Serialize};
 
 /// Encrypted data with associated metadata
@@ -61,15 +62,16 @@ impl EncryptionKey {
         let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
         let mut in_out = data.to_vec();
 
-        let aad = aad.unwrap_or(&[]);
+        let aad_bytes = aad.unwrap_or(&[]);
+        let aad = Aad::from(aad_bytes);
         self.aead_key
-            .seal_in_place_separate_tag(nonce, aead, &mut in_out)
+            .seal_in_place_separate_tag(nonce, aad, &mut in_out)
             .map_err(|e| crate::CryptoError::EncryptionError(e.to_string()))?;
 
         Ok(EncryptedData {
             ciphertext: in_out,
             nonce: nonce_bytes.to_vec(),
-            aad: aad.map(|a| a.to_vec()),
+            aad: Some(aad_bytes.to_vec()),
         })
     }
 
@@ -79,7 +81,7 @@ impl EncryptionKey {
             .map_err(|e| crate::CryptoError::DecryptionError(e.to_string()))?;
 
         let mut ciphertext = encrypted.ciphertext.clone();
-        let aad = encrypted.aad.as_deref().unwrap_or(&[]);
+        let aad = Aad::from(encrypted.aad.as_deref().unwrap_or(&[]));
 
         self.aead_key
             .open_in_place(nonce, aad, &mut ciphertext)

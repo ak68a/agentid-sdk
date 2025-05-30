@@ -1,8 +1,26 @@
+//! Verification system for Agent Commerce Kit Identity (ACK ID)
+//!
+//! This crate implements the verification system for ACK ID, including:
+//! - Verification requests and results
+//! - Verification policies
+//! - Verification service
+//!
+//! TODO: Implement advanced verification workflows:
+//! - Multi-agent verification with consensus
+//! - Verification evidence collection and validation
+//! - Verification history and audit trails
+//! - Verification revocation and appeals
+//! - Verification delegation and proxy verification
+
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-use agentid_core::{AgentId, RelationshipType, TrustLevel, TrustScore};
+use agentid_trust::RelationshipType;
+use agentid_types::{
+    AgentId, TrustLevel, TrustScore, VerificationLevel, VerificationPolicy, VerificationRequest,
+    VerificationResult, VerificationStatus,
+};
 use thiserror::Error;
 
 /// Errors that can occur during verification
@@ -26,7 +44,7 @@ pub type Result<T> = std::result::Result<T, VerifyError>;
 
 /// Verification policy requirements
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VerificationPolicy {
+pub struct VerifyPolicy {
     /// Minimum required trust level
     pub minimum_trust_level: TrustLevel,
     /// Required attributes
@@ -42,7 +60,7 @@ pub struct VerificationPolicy {
     pub constraints: HashMap<String, serde_json::Value>,
 }
 
-impl VerificationPolicy {
+impl VerifyPolicy {
     /// Create a new verification policy
     pub fn new(minimum_trust_level: TrustLevel) -> Self {
         Self {
@@ -88,13 +106,13 @@ impl VerificationPolicy {
 
 /// Verification request
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VerificationRequest {
+pub struct VerifyRequest {
     /// The requesting agent's ID
     pub requester_id: AgentId,
     /// The target agent's ID to verify
     pub target_id: AgentId,
     /// The verification policy to apply
-    pub policy: VerificationPolicy,
+    pub policy: VerifyPolicy,
     /// When the request was created
     pub created_at: DateTime<Utc>,
     /// When the request expires
@@ -104,9 +122,9 @@ pub struct VerificationRequest {
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
-impl VerificationRequest {
+impl VerifyRequest {
     /// Create a new verification request
-    pub fn new(requester_id: AgentId, target_id: AgentId, policy: VerificationPolicy) -> Self {
+    pub fn new(requester_id: AgentId, target_id: AgentId, policy: VerifyPolicy) -> Self {
         let created_at = Utc::now();
         Self {
             requester_id,
@@ -136,87 +154,6 @@ impl VerificationRequest {
     }
 }
 
-/// Verification result status
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum VerificationStatus {
-    /// Verification passed all requirements
-    Verified,
-    /// Verification failed to meet requirements
-    Failed,
-    /// Verification is pending additional checks
-    Pending,
-    /// Verification was rejected
-    Rejected,
-    /// Verification expired
-    Expired,
-}
-
-/// Verification result
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VerificationResult {
-    /// The verification request
-    pub request: VerificationRequest,
-    /// The verification status
-    pub status: VerificationStatus,
-    /// When the verification was performed
-    pub verified_at: DateTime<Utc>,
-    /// When the verification result expires
-    pub expires_at: DateTime<Utc>,
-    /// The trust score at verification time
-    pub trust_score: Option<TrustScore>,
-    /// Verification details and evidence
-    #[serde(default)]
-    pub evidence: HashMap<String, serde_json::Value>,
-    /// Verification failure reasons (if any)
-    #[serde(default)]
-    pub failure_reasons: Vec<String>,
-}
-
-impl VerificationResult {
-    /// Create a new verification result
-    pub fn new(request: VerificationRequest, status: VerificationStatus) -> Self {
-        let verified_at = Utc::now();
-        Self {
-            expires_at: verified_at + request.policy.validity_period,
-            request,
-            status,
-            verified_at,
-            trust_score: None,
-            evidence: HashMap::new(),
-            failure_reasons: Vec::new(),
-        }
-    }
-
-    /// Add verification evidence
-    pub fn with_evidence(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.evidence.insert(key.into(), value);
-        self
-    }
-
-    /// Add a failure reason
-    pub fn with_failure_reason(mut self, reason: impl Into<String>) -> Self {
-        self.failure_reasons.push(reason.into());
-        self
-    }
-
-    /// Set the trust score
-    pub fn with_trust_score(mut self, score: TrustScore) -> Self {
-        self.trust_score = Some(score);
-        self
-    }
-
-    /// Check if the verification result is still valid
-    pub fn is_valid(&self) -> bool {
-        Utc::now() < self.expires_at
-    }
-
-    /// Check if the verification passed
-    pub fn is_verified(&self) -> bool {
-        self.status == VerificationStatus::Verified
-    }
-}
-
 /// Verification service
 #[derive(Debug, Clone)]
 pub struct VerificationService {
@@ -237,19 +174,13 @@ impl VerificationService {
 
     /// Submit a verification request
     pub fn submit_request(&mut self, request: VerificationRequest) -> Result<String> {
-        if !request.is_valid() {
+        if Utc::now() >= request.expires_at {
             return Err(VerifyError::RequestError(
                 "Verification request has expired".into(),
             ));
         }
 
-        let request_id = format!(
-            "verify_{}_{}_{}",
-            request.requester_id.id(),
-            request.target_id.id(),
-            request.created_at.timestamp()
-        );
-
+        let request_id = request.id.clone();
         self.requests.insert(request_id.clone(), request);
         Ok(request_id)
     }
@@ -269,12 +200,7 @@ impl VerificationService {
         );
 
         // Remove the corresponding request
-        self.requests.remove(&format!(
-            "verify_{}_{}_{}",
-            result.request.requester_id.id(),
-            result.request.target_id.id(),
-            result.request.created_at.timestamp()
-        ));
+        self.requests.remove(&result.request.id);
 
         self.results.insert(result_id.clone(), result);
         Ok(result_id)
@@ -286,19 +212,20 @@ impl VerificationService {
     }
 
     /// Get all valid verification results for a target agent
-    pub fn get_valid_results_for_target(
-        &self,
-        target_id: &AgentId,
-    ) -> impl Iterator<Item = &VerificationResult> {
-        self.results
-            .values()
-            .filter(move |result| &result.request.target_id == target_id && result.is_valid())
+    pub fn get_valid_results_for_target<'a>(
+        &'a self,
+        target_id: &'a AgentId,
+    ) -> impl Iterator<Item = &'a VerificationResult> {
+        self.results.values().filter(move |result| {
+            &result.request.target_id == target_id && Utc::now() < result.expires_at
+        })
     }
 
     /// Clean up expired requests and results
     pub fn cleanup_expired(&mut self) {
-        self.requests.retain(|_, request| request.is_valid());
-        self.results.retain(|_, result| result.is_valid());
+        let now = Utc::now();
+        self.requests.retain(|_, request| now < request.expires_at);
+        self.results.retain(|_, result| now < result.expires_at);
     }
 }
 
@@ -307,6 +234,3 @@ impl Default for VerificationService {
         Self::new()
     }
 }
-
-pub mod rotation;
-pub use rotation::RotationVerifier;

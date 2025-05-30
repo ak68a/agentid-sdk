@@ -1,5 +1,5 @@
 //! Trust implementation for the ACK ID protocol.
-//! 
+//!
 //! This module provides the core trust types and their implementation,
 //! which represent trust relationships between agents in the ACK ID system.
 
@@ -11,39 +11,43 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use crate::{Agent, AgentId, AgentIdError, Result};
+use crate::{Agent, AgentIdError, Result};
+use agentid_trust::{TrustConfig, TrustOperations};
+use agentid_types::{AgentId, TrustLevel, TrustRelationship as TypesTrustRelationship, TrustScore};
 
-/// Represents the level of trust between agents
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum TrustLevel {
-    /// No trust relationship
-    None = 0,
-    /// Basic trust (e.g., verified identity)
-    Basic = 1,
-    /// Established trust (e.g., successful transactions)
-    Established = 2,
-    /// High trust (e.g., long-term relationship)
-    High = 3,
-    /// Maximum trust (e.g., verified authority)
-    Maximum = 4,
+/// Core trust operations that extend the trust framework
+#[async_trait]
+pub trait CoreTrustOperations {
+    /// Get the trust configuration
+    async fn get_config(&self) -> Result<TrustConfig>;
+
+    /// Get the trust score for an agent
+    async fn get_trust_score(&self, agent: &Agent) -> Result<TrustScore>;
+
+    /// Update trust attributes for an agent
+    async fn update_trust_attributes(
+        &self,
+        agent: &Agent,
+        attributes: &TrustAttributeSet,
+    ) -> Result<TrustAttributeSet>;
 }
 
-impl Default for TrustLevel {
-    fn default() -> Self {
-        Self::None
-    }
+/// Trust configuration for core operations
+#[derive(Debug, Clone)]
+pub struct CoreTrustConfig {
+    /// Minimum trust score required for operations
+    pub minimum_trust_score: f64,
+    /// Trust score thresholds for different levels
+    pub trust_level_thresholds: Vec<(TrustLevel, f64)>,
 }
 
-impl fmt::Display for TrustLevel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::None => write!(f, "None"),
-            Self::Basic => write!(f, "Basic"),
-            Self::Established => write!(f, "Established"),
-            Self::High => write!(f, "High"),
-            Self::Maximum => write!(f, "Maximum"),
-        }
-    }
+/// A set of trust attributes
+#[derive(Debug, Clone)]
+pub struct TrustAttributeSet {
+    /// The agent ID these attributes belong to
+    pub agent_id: AgentId,
+    /// When the attributes were last updated
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// Represents a trust relationship between two agents
@@ -138,75 +142,54 @@ impl TrustRelationship {
     }
 }
 
-impl fmt::Display for TrustRelationship {
+/// Wrapper type for TrustRelationship that implements Display
+#[derive(Debug, Clone)]
+pub struct CoreTrustRelationship(pub TypesTrustRelationship);
+
+impl fmt::Display for CoreTrustRelationship {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "Trust from {} to {}: {} (Updated: {})",
-            self.from,
-            self.to,
-            self.level,
-            self.updated_at
+            self.0.from(),
+            self.0.to(),
+            self.0.level(),
+            self.0.updated_at()
         )
     }
-}
-
-/// A trait for managing trust relationships
-#[async_trait]
-pub trait TrustManager {
-    /// Establish a trust relationship between two agents
-    async fn establish_trust(
-        &mut self,
-        from: AgentId,
-        to: AgentId,
-        level: TrustLevel,
-    ) -> Result<TrustRelationship>;
-
-    /// Update the level of trust in a relationship
-    async fn update_trust(
-        &mut self,
-        from: AgentId,
-        to: AgentId,
-        level: TrustLevel,
-    ) -> Result<TrustRelationship>;
-
-    /// Get the trust relationship between two agents
-    async fn get_trust(&self, from: AgentId, to: AgentId) -> Result<Option<TrustRelationship>>;
-
-    /// Remove a trust relationship
-    async fn remove_trust(&mut self, from: AgentId, to: AgentId) -> Result<()>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agentid_types::TrustLevel;
 
     #[test]
     fn test_trust_level_ordering() {
-        assert!(TrustLevel::Maximum > TrustLevel::High);
-        assert!(TrustLevel::High > TrustLevel::Established);
-        assert!(TrustLevel::Established > TrustLevel::Basic);
-        assert!(TrustLevel::Basic > TrustLevel::None);
+        assert!(TrustLevel::VeryHigh > TrustLevel::High);
+        assert!(TrustLevel::High > TrustLevel::Medium);
+        assert!(TrustLevel::Medium > TrustLevel::Low);
+        assert!(TrustLevel::Low > TrustLevel::None);
     }
 
     #[test]
     fn test_trust_relationship_creation() {
         let agent1 = AgentId::new("agent1");
         let agent2 = AgentId::new("agent2");
-        
-        let trust = TrustRelationship::new(agent1.clone(), agent2.clone(), TrustLevel::Basic)
-            .unwrap();
-        
+
+        let trust =
+            TrustRelationship::new(agent1.clone(), agent2.clone(), TrustLevel::Low).unwrap();
+
         assert_eq!(trust.from(), &agent1);
         assert_eq!(trust.to(), &agent2);
-        assert_eq!(trust.level(), TrustLevel::Basic);
+        assert_eq!(trust.level(), TrustLevel::Low);
         assert!(trust.is_active());
     }
 
     #[test]
     fn test_trust_relationship_self_trust() {
         let agent = AgentId::new("agent");
-        let result = TrustRelationship::new(agent.clone(), agent, TrustLevel::Basic);
+        let result = TrustRelationship::new(agent.clone(), agent, TrustLevel::Low);
         assert!(result.is_err());
     }
 
@@ -214,14 +197,19 @@ mod tests {
     fn test_trust_relationship_updates() {
         let agent1 = AgentId::new("agent1");
         let agent2 = AgentId::new("agent2");
-        
-        let mut trust = TrustRelationship::new(agent1, agent2, TrustLevel::Basic).unwrap();
-        
+
+        let mut trust = TrustRelationship::new(agent1, agent2, TrustLevel::Low).unwrap();
+
         trust.update_level(TrustLevel::High).unwrap();
         assert_eq!(trust.level(), TrustLevel::High);
-        assert!(trust.is_at_least(TrustLevel::Established));
-        
+        assert!(trust.is_at_least(TrustLevel::Medium));
+
         trust.update_level(TrustLevel::None).unwrap();
         assert!(!trust.is_active());
     }
-} 
+
+    #[tokio::test]
+    async fn test_trust_operations() {
+        // TODO: Implement trust operation tests
+    }
+}

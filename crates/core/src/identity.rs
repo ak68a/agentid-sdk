@@ -11,7 +11,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use crate::{Agent, AgentId, AgentIdError, Result};
+use crate::{Agent, AgentIdError, Result};
+use agentid_types::AgentId;
 
 /// Represents the verification level of an identity
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,10 +178,11 @@ mod tests {
     #[test]
     fn test_identity_verification() {
         let agent = Agent::new("test-agent").unwrap();
+        let agent_id = agent.id().clone();
         let mut identity = Identity::new(agent).unwrap();
 
         identity
-            .update_verification(VerificationLevel::AgentVerified, Some(agent.id().clone()))
+            .update_verification(VerificationLevel::AgentVerified, Some(agent_id))
             .unwrap();
 
         assert!(identity.is_verified());

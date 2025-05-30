@@ -17,10 +17,10 @@ tracing.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 
-# Internal dependencies (commented out for now so that tests can run)
-# agentid-crypto = { path = "../crypto" }
-# agentid-trust = { path = "../trust" }
-# agentid-verify = { path = "../verify" }
+# Internal dependencies
+agentid-types = { path = "../types" }
+agentid-crypto = { path = "../crypto" }
+agentid-trust = { path = "../trust" }
 
 # Additional dependencies
 uuid = { version = "1.7", features = ["v4", "serde"] }

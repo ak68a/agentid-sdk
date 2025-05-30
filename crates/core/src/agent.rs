@@ -11,7 +11,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use crate::{AgentCapabilities, AgentId, AgentIdError, AgentStatus, Result};
+use crate::Result;
+use agentid_types::{AgentCapabilities, AgentId, AgentStatus};
 
 /// Represents an agent in the ACK ID system
 #[derive(Debug, Clone, Serialize, Deserialize)]

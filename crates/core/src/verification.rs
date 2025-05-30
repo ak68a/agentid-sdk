@@ -1,5 +1,5 @@
 //! Verification implementation for the ACK ID protocol.
-//! 
+//!
 //! This module provides the core verification types and their implementation,
 //! which handle the verification of agent identities and trust relationships.
 
@@ -7,89 +7,15 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use crate::{
-    Agent, AgentId, AgentIdError, Identity, Result, TrustLevel, TrustRelationship,
-    VerificationLevel,
+use crate::{Agent, AgentIdError, Identity, Result};
+use agentid_types::{
+    AgentId, TrustLevel, TrustMetrics, TrustRelationship, TrustScore, VerificationLevel,
+    VerificationPolicy, VerificationRequest, VerificationResult, VerificationStatus,
 };
-
-/// Represents the result of a verification attempt
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VerificationResult {
-    /// Whether the verification was successful
-    success: bool,
-    /// The level of verification achieved
-    level: VerificationLevel,
-    /// When this verification was performed
-    verified_at: DateTime<Utc>,
-    /// The agent that performed the verification
-    verified_by: Option<AgentId>,
-    /// Additional verification metadata
-    #[serde(default)]
-    metadata: serde_json::Value,
-}
-
-impl VerificationResult {
-    /// Create a new verification result
-    pub fn new(
-        success: bool,
-        level: VerificationLevel,
-        verified_by: Option<AgentId>,
-    ) -> Self {
-        Self {
-            success,
-            level,
-            verified_at: Utc::now(),
-            verified_by,
-            metadata: serde_json::json!({}),
-        }
-    }
-
-    /// Get whether the verification was successful
-    pub fn success(&self) -> bool {
-        self.success
-    }
-
-    /// Get the level of verification achieved
-    pub fn level(&self) -> VerificationLevel {
-        self.level
-    }
-
-    /// Get when this verification was performed
-    pub fn verified_at(&self) -> DateTime<Utc> {
-        self.verified_at
-    }
-
-    /// Get the agent that performed the verification
-    pub fn verified_by(&self) -> Option<&AgentId> {
-        self.verified_by.as_ref()
-    }
-
-    /// Get the metadata for this verification
-    pub fn metadata(&self) -> &serde_json::Value {
-        &self.metadata
-    }
-
-    /// Update the metadata for this verification
-    pub fn update_metadata(&mut self, metadata: serde_json::Value) {
-        self.metadata = metadata;
-    }
-}
-
-impl fmt::Display for VerificationResult {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Verification {} (Level: {:?}, Verified: {})",
-            if self.success { "Successful" } else { "Failed" },
-            self.level,
-            self.verified_at
-        )
-    }
-}
 
 /// A trait for verifying agent identities and trust relationships
 #[async_trait]
@@ -149,31 +75,52 @@ mod tests {
     #[test]
     fn test_verification_result_creation() {
         let agent = AgentId::new("verifier");
-        let result = VerificationResult::new(
-            true,
-            VerificationLevel::AgentVerified,
-            Some(agent.clone()),
-        );
+        let request = VerificationRequest {
+            id: "test".to_string(),
+            requester_id: agent.clone(),
+            target_id: agent.clone(),
+            policy: VerificationPolicy {
+                name: "test".to_string(),
+                description: "test".to_string(),
+                required_level: TrustLevel::High,
+                min_verifiers: 1,
+                require_consensus: true,
+                verification_period: Duration::hours(1),
+                metadata: Default::default(),
+            },
+            created_at: Utc::now(),
+            expires_at: Utc::now() + Duration::hours(1),
+            metadata: Default::default(),
+        };
 
-        assert!(result.success());
-        assert_eq!(result.level(), VerificationLevel::AgentVerified);
-        assert_eq!(result.verified_by(), Some(&agent));
+        let metrics = TrustMetrics {
+            direct_trust: 0.8,
+            indirect_trust: 0.7,
+            historical_trust: 0.9,
+            behavioral_trust: 0.85,
+            identity_verification: 1.0,
+            custom_metrics: Default::default(),
+        };
+
+        let result = VerificationResult {
+            request,
+            status: VerificationStatus::Verified,
+            verified_at: Utc::now(),
+            expires_at: Utc::now() + Duration::hours(1),
+            trust_score: Some(TrustScore {
+                score: 0.85,
+                level: TrustLevel::High,
+                metrics,
+                timestamp: Utc::now(),
+                confidence: 0.9,
+                validity_period: Duration::hours(24),
+            }),
+            evidence: Default::default(),
+            failure_reasons: Default::default(),
+        };
+
+        assert_eq!(result.status, VerificationStatus::Verified);
+        assert!(result.trust_score.is_some());
+        assert_eq!(result.trust_score.as_ref().unwrap().level, TrustLevel::High);
     }
-
-    #[test]
-    fn test_verification_result_metadata() {
-        let mut result = VerificationResult::new(
-            true,
-            VerificationLevel::Basic,
-            None,
-        );
-
-        let metadata = serde_json::json!({
-            "reason": "Initial verification",
-            "method": "Document check"
-        });
-
-        result.update_metadata(metadata.clone());
-        assert_eq!(result.metadata(), &metadata);
-    }
-} 
+}
