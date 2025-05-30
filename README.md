@@ -1,5 +1,18 @@
 # AgentID SDK
 
+<div align="center">
+
+![AgentID SDK](https://img.shields.io/badge/AgentID-SDK-blue)
+![Status](https://img.shields.io/badge/Status-Active%20Development-orange)
+![License](https://img.shields.io/badge/License-Apache%202.0-green)
+
+> 🚧 **Active Development Notice**  
+> This project is currently under active development.  
+> Core features are being implemented and tested.  
+> Not ready for production use.
+
+</div>
+
 A Rust implementation of the Agent Commerce Kit Identity (ACK ID) protocol. This SDK provides tools and libraries for implementing ACK ID in your applications.
 
 ## Project Structure

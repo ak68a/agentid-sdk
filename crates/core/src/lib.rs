@@ -1,5 +1,5 @@
 //! Core implementation of the Agent Commerce Kit Identity (ACK ID) protocol.
-//! 
+//!
 //! This crate provides the fundamental types and traits for implementing
 //! agent-based identity and trust in commerce applications.
 
@@ -15,11 +15,13 @@ use validator::Validate;
 
 pub mod agent;
 pub mod identity;
+pub mod rotation;
 pub mod trust;
 pub mod verification;
 
 pub use agent::Agent;
 pub use identity::Identity;
+pub use rotation::{RotationConfig, RotationOperations, RotationRecord, RotationStatus};
 pub use trust::TrustLevel;
 pub use verification::Verification;
 
@@ -153,4 +155,4 @@ mod tests {
         assert!(!capabilities.can_verify);
         assert!(!capabilities.can_manage_trust);
     }
-} 
+}

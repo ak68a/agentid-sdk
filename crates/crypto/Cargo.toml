@@ -1,0 +1,30 @@
+[package]
+name = "agentid-crypto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cryptographic operations for Agent Commerce Kit Identity (ACK ID)"
+
+[dependencies]
+# Workspace dependencies
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+
+# Crypto-specific dependencies
+ring.workspace = true
+ed25519-dalek.workspace = true
+rand.workspace = true
+
+# Internal dependencies
+agentid-core = { path = "../core" }
+
+[dev-dependencies]
+criterion.workspace = true
+mockall.workspace = true 
