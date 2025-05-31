@@ -1,0 +1,17 @@
+[package]
+name = "agentid-python"
+version = "0.1.0"
+edition = "2021"
+description = "Python bindings for AgentID SDK"
+
+[lib]
+name = "agentid"
+crate-type = ["cdylib"]  # This is required for Python bindings
+
+[dependencies]
+pyo3 = { version = "0.19", features = ["extension-module"] }
+agentid-core = { path = "../../crates/core" }
+anyhow = "1.0"
+
+[build-dependencies]
+pyo3-build-config = "0.19"
