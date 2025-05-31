@@ -5,7 +5,9 @@ members = [
     "crates/crypto",
     "crates/trust",
     "crates/verify",
-    "crates/types",
+    "crates/types", 
+    "bindings/python",
+    "demo"
 ]
 
 [workspace.package]

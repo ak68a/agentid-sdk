@@ -13,7 +13,7 @@ This is a simple demo project showing how to use the AgentID Python bindings.
 1. Create and activate a virtual environment:
 ```bash
 # Create a new virtual environment
-python -m venv venv
+python -m venv venv # Run on root level of the repo
 
 # Activate the virtual environment
 # On macOS/Linux:

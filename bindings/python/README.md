@@ -12,7 +12,7 @@ Python bindings for the AgentID SDK using PyO3.
 
 1. Create and activate a virtual environment:
 ```bash
-python -m venv venv
+python -m venv venv # Run on root level of the repo (agentid-sdk)
 source venv/bin/activate  # On Windows: .\venv\Scripts\activate
 ```
 

@@ -1,0 +1,19 @@
+[package]
+name = "agentid-demo"
+version = "0.1.0"
+edition = "2021"
+description = "A demo project for experimenting with the AgentID SDK"
+authors = ["Alex <hey.ak68a.co>"]
+
+[dependencies]
+agentid-core = { path = "../crates/core" }
+agentid-crypto = { path = "../crates/crypto" }
+agentid-trust = { path = "../crates/trust" }
+agentid-verify = { path = "../crates/verify" }
+agentid-types = { path = "../crates/types" }
+
+# For better development experience
+anyhow = "1.0"  # Error handling
+tokio = { version = "1.0", features = ["full"] }  # Async runtime
+tracing = "0.1"  # Logging
+tracing-subscriber = "0.3"  # Logging configuration
